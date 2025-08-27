@@ -1,0 +1,1256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>FitnessMate</title>
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900">
+  <div id="root"></div>
+
+  <!-- React + ReactDOM + Babel (for JSX in-browser) -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useRef, useEffect } = React;
+
+    // --- Centralized API Configuration ---
+    const GEMINI_API_KEY = ""; // PASTE YOUR GEMINI API KEY HERE
+    const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${GEMINI_API_KEY}`;
+
+    // --- Default Goal Data ---
+    const defaultGoals = {
+      calories: 2000,
+      protein: 120,
+      carbs: 250,
+      fat: 60,
+      activity: 30, // in minutes
+      water: 8, // in glasses
+    };
+
+    // --- Main App Component ---
+    function App() {
+      const [screen, setScreen] = useState('dashboard'); // 'dashboard', 'scan', 'profile', 'planner', 'workout', 'coach', 'progress'
+
+      // --- Theme State Management ---
+      const [theme, setTheme] = useState(() => {
+        const savedTheme = localStorage.getItem('theme');
+        return savedTheme ? savedTheme : 'light';
+      });
+
+      useEffect(() => {
+        if (theme === 'dark') {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+        localStorage.setItem('theme', theme);
+      }, [theme]);
+
+      useEffect(() => {
+        if ('Notification' in window && Notification.permission === 'default') {
+          Notification.requestPermission();
+        }
+      }, []);
+
+      const toggleTheme = () => {
+        setTheme(prevTheme => prevTheme === 'light' ? 'dark' : 'light');
+      };
+
+      // --- State Initialization from localStorage ---
+      const [goals, setGoals] = useState(() => {
+        const savedGoals = localStorage.getItem('goals');
+        return savedGoals ? JSON.parse(savedGoals) : defaultGoals;
+      });
+
+      const [dailyIntake, setDailyIntake] = useState(() => {
+        const savedIntake = localStorage.getItem('dailyIntake');
+        return savedIntake ? JSON.parse(savedIntake) : { calories: 0, protein: 0, carbs: 0, fat: 0, activity: 0, water: 0 };
+      });
+
+      const [recentMeals, setRecentMeals] = useState(() => {
+        const savedMeals = localStorage.getItem('recentMeals');
+        return savedMeals ? JSON.parse(savedMeals) : [];
+      });
+
+      const [dailyHistory, setDailyHistory] = useState(() => {
+        const savedHistory = localStorage.getItem('dailyHistory');
+        return savedHistory ? JSON.parse(savedHistory) : {};
+      });
+
+      // --- Data Archiving Logic ---
+      useEffect(() => {
+        const lastSavedDate = localStorage.getItem('lastSavedDate');
+        const today = new Date().toISOString().split('T')[0];
+
+        if (lastSavedDate && lastSavedDate !== today) {
+          const oldIntake = JSON.parse(localStorage.getItem('dailyIntake'));
+          const oldMeals = JSON.parse(localStorage.getItem('recentMeals'));
+          const savedGoals = JSON.parse(localStorage.getItem('goals')) || defaultGoals;
+
+          const calorieScore = Math.max(0, 100 - Math.abs(oldIntake.calories - savedGoals.calories) / savedGoals.calories * 100);
+          const activityScore = Math.min(100, (oldIntake.activity / savedGoals.activity) * 100);
+          const waterScore = Math.min(100, (oldIntake.water / savedGoals.water) * 100);
+          const finalScore = Math.round((calorieScore * 0.5) + (activityScore * 0.3) + (waterScore * 0.2));
+
+          setDailyHistory(prevHistory => ({
+            ...prevHistory,
+            [lastSavedDate]: {
+              intake: oldIntake,
+              meals: oldMeals,
+              score: finalScore,
+            }
+          }));
+
+          // Reset for the new day
+          setDailyIntake({ calories: 0, protein: 0, carbs: 0, fat: 0, activity: 0, water: 0 });
+          setRecentMeals([]);
+        }
+
+        localStorage.setItem('lastSavedDate', today);
+      }, []);
+
+      // --- useEffect Hooks for Data Persistence ---
+      useEffect(() => { localStorage.setItem('goals', JSON.stringify(goals)); }, [goals]);
+      useEffect(() => { localStorage.setItem('dailyIntake', JSON.stringify(dailyIntake)); }, [dailyIntake]);
+      useEffect(() => { localStorage.setItem('recentMeals', JSON.stringify(recentMeals)); }, [recentMeals]);
+      useEffect(() => { localStorage.setItem('dailyHistory', JSON.stringify(dailyHistory)); }, [dailyHistory]);
+
+      // Function to add a new meal to the log
+      const handleLogMeal = (mealData) => {
+        setDailyIntake(prevIntake => ({
+          ...prevIntake,
+          calories: prevIntake.calories + (mealData.calories || 0),
+          protein: prevIntake.protein + (mealData.protein || 0),
+          carbs: prevIntake.carbs + (mealData.carbs || 0),
+          fat: prevIntake.fat + (mealData.fat || 0),
+        }));
+
+        const newMeal = {
+          id: Date.now(),
+          name: mealData.name,
+          calories: mealData.calories,
+          image: mealData.image || 'https://placehold.co/100x100/cccccc/333333?text=Meal',
+          mood: mealData.mood || 'Neutral',
+        };
+        setRecentMeals(prevMeals => [newMeal, ...prevMeals]);
+        setScreen('dashboard');
+      };
+
+      // Function to log daily activity
+      const handleLogActivity = (activity) => {
+        setDailyIntake(prevIntake => ({
+          ...prevIntake,
+          activity: prevIntake.activity + (activity.minutes || 0),
+        }));
+      };
+
+      const handleLogWater = () => {
+        setDailyIntake(prevIntake => ({
+          ...prevIntake,
+          water: prevIntake.water + 1,
+        }));
+      };
+
+      // Function to render the current screen based on state
+      const renderScreen = () => {
+        switch (screen) {
+          case 'dashboard':
+            return <Dashboard dailyIntake={dailyIntake} recentMeals={recentMeals} goals={goals} onLogActivity={handleLogActivity} onLogWater={handleLogWater} />;
+          case 'scan':
+            return <Scan onLogMeal={handleLogMeal} />;
+          case 'profile':
+            return <Profile theme={theme} toggleTheme={toggleTheme} goals={goals} setGoals={setGoals} />;
+          case 'planner':
+            return <MealPlanner goals={goals} />;
+          case 'workout':
+            return <WorkoutPlanner />;
+          case 'coach':
+            return <Coach dailyIntake={dailyIntake} recentMeals={recentMeals} />;
+          case 'progress':
+            return <Progress dailyHistory={dailyHistory} />;
+          default:
+            return <Dashboard dailyIntake={dailyIntake} recentMeals={recentMeals} goals={goals} onLogActivity={handleLogActivity} onLogWater={handleLogWater} />;
+        }
+      };
+
+      return (
+        <div className="bg-gray-50 dark:bg-gray-900 min-h-screen font-sans flex flex-col">
+          <main className="flex-grow">
+            {renderScreen()}
+          </main>
+          <BottomNavBar screen={screen} setScreen={setScreen} />
+        </div>
+      );
+    }
+
+    // --- Screens ---
+
+    // Dashboard Screen Component
+    const Dashboard = ({ dailyIntake, recentMeals, goals, onLogActivity, onLogWater }) => {
+      const calorieProgress = goals.calories > 0 ? (dailyIntake.calories / goals.calories) * 100 : 0;
+      const [quote, setQuote] = useState('');
+
+      // Fetch daily motivational quote
+      useEffect(() => {
+        const fetchQuote = async () => {
+          const today = new Date().toISOString().split('T')[0];
+          const lastFetchDate = localStorage.getItem('lastQuoteFetchDate');
+          const savedQuote = localStorage.getItem('dailyQuote');
+
+          if (lastFetchDate === today && savedQuote) {
+            setQuote(savedQuote);
+            return;
+          }
+
+          const prompt = "Give me a short, powerful motivational quote for fitness. Respond with only the quote itself, no extra text or quotation marks.";
+
+          try {
+            const payload = { contents: [{ parts: [{ text: prompt }] }] };
+            const response = await fetch(GEMINI_API_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+
+            if (!response.ok) throw new Error('Failed to fetch quote');
+
+            const result = await response.json();
+            const newQuote = result.candidates[0].content.parts[0].text.trim();
+            setQuote(newQuote);
+            localStorage.setItem('dailyQuote', newQuote);
+            localStorage.setItem('lastQuoteFetchDate', today);
+          } catch (error) {
+            console.error("Failed to fetch daily quote:", error);
+            setQuote("The only bad workout is the one that didn't happen."); // Fallback quote
+          }
+        };
+
+        fetchQuote();
+      }, []);
+
+      // Calculate Health Score
+      const calculateHealthScore = () => {
+        if (!dailyIntake) return 0;
+        const calorieScore = Math.max(0, 100 - Math.abs(dailyIntake.calories - goals.calories) / goals.calories * 100);
+        const activityScore = Math.min(100, (dailyIntake.activity / goals.activity) * 100);
+        const waterScore = Math.min(100, (dailyIntake.water / goals.water) * 100);
+        return Math.round((calorieScore * 0.5) + (activityScore * 0.3) + (waterScore * 0.2));
+      };
+
+      const healthScore = calculateHealthScore();
+
+      return (
+        <div className="p-6 pb-24">
+          <header className="mb-6 bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-md">
+            <div className="flex items-center">
+              <svg className="w-10 h-10 mr-3 text-pink-500" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM16.6 13.2L14.4 15.4C13.6 16.2 12.4 16.2 11.6 15.4L7.4 11.2C6.6 10.4 6.6 9.2 7.4 8.4L9.6 6.2C10.4 5.4 11.6 5.4 12.4 6.2L16.6 10.4C17.4 11.2 17.4 12.4 16.6 13.2Z" fill="currentColor"/>
+              </svg>
+              <div>
+                <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-200">FitnessMate</h1>
+                <p className="text-gray-500 dark:text-gray-400">Your daily health summary</p>
+              </div>
+            </div>
+            {quote && <p className="text-gray-600 dark:text-gray-300 italic mt-2 text-center bg-gray-100 dark:bg-gray-700 p-2 rounded-lg">"{quote}"</p>}
+          </header>
+
+          <div className="grid md:grid-cols-2 gap-6 mb-6">
+            {/* Health Score */}
+            <div>
+              <h2 className="text-xl font-bold text-gray-800 dark:text-gray-200 mb-4">Health Score</h2>
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-md text-center h-full flex flex-col justify-center">
+                <div className="relative w-32 h-32 mx-auto">
+                  <svg className="w-full h-full" viewBox="0 0 36 36">
+                    <path className="text-gray-200 dark:text-gray-700" strokeWidth="3" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                    <path className="text-green-500" strokeWidth="3" strokeLinecap="round" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" strokeDasharray={`${healthScore}, 100`} />
+                  </svg>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-3xl font-bold text-green-500">{healthScore}</span>
+                  </div>
+                </div>
+                <p className="text-gray-600 dark:text-gray-400 mt-2">Today's Score / 100</p>
+                <div className="text-xs text-gray-500 dark:text-gray-400 mt-2 space-y-1">
+                  <p><span className="font-bold text-pink-500">50%</span> Nutrition</p>
+                  <p><span className="font-bold text-cyan-500">30%</span> Activity</p>
+                  <p><span className="font-bold text-blue-500">20%</span> Hydration</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Activity & Water Tracker */}
+            <div>
+              <h2 className="text-xl font-bold text-gray-800 dark:text-gray-200 mb-4">Activity & Hydration</h2>
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-md space-y-4 h-full flex flex-col justify-center">
+                <ActivityTimer onLogActivity={onLogActivity} />
+                <WaterTracker onLogWater={onLogWater} dailyIntake={dailyIntake} goals={goals} />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-gradient-to-br from-cyan-400 to-pink-500 rounded-2xl p-6 mb-6 text-white shadow-lg">
+            <p className="font-semibold">Calories</p>
+            <div className="flex items-end my-2">
+              <p className="text-5xl font-bold">{Math.round(dailyIntake.calories)}</p>
+              <p className="ml-2 mb-1">/ {goals.calories} kcal</p>
+            </div>
+            <div className="w-full bg-white/30 rounded-full h-2.5">
+              <div className="bg-white h-2.5 rounded-full" style={{ width: `${calorieProgress}%` }}></div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4 mb-6">
+            <MacroCard title="Protein" value={dailyIntake.protein} goal={goals.protein} unit="g" color="text-blue-500" />
+            <MacroCard title="Carbs" value={dailyIntake.carbs} goal={goals.carbs} unit="g" color="text-yellow-500" />
+            <MacroCard title="Fat" value={dailyIntake.fat} goal={goals.fat} unit="g" color="text-red-500" />
+          </div>
+
+          <div>
+            <h2 className="text-xl font-bold text-gray-800 dark:text-gray-200 mb-4">Recent Meals</h2>
+            {recentMeals.length > 0 ? (
+              <div className="space-y-3">
+                {recentMeals.map((meal) => (
+                  <MealCard key={meal.id} meal={meal} />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-md">
+                <p>No meals logged yet.</p>
+                <p>Tap the 'Cal' button to scan your first meal!</p>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    // Profile Screen Component
+    const Profile = ({ theme, toggleTheme, goals, setGoals }) => {
+      const handleGoalChange = (key, value) => {
+        setGoals(prevGoals => ({ ...prevGoals, [key]: Number(value) }));
+      };
+
+      return (
+        <div className="p-6 pb-24">
+          <header className="mb-6">
+            <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-200">My Profile</h1>
+          </header>
+
+          <div className="flex flex-col items-center mb-6 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-md">
+            <img src="https://placehold.co/100x100/EAB543/ffffff?text=User" alt="User profile" className="w-24 h-24 rounded-full mb-4" />
+            <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-200">John Doe</h2>
+            <p className="text-gray-500 dark:text-gray-400">john.doe@example.com</p>
+          </div>
+
+          <div className="mb-6">
+            <h3 className="text-xl font-bold text-gray-800 dark:text-gray-200 mb-4">My Goals</h3>
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md p-4 space-y-3">
+              <div className="p-2">
+                <label className="font-semibold mb-2 block text-gray-800 dark:text-gray-200">Daily Calories: {goals.calories} kcal</label>
+                <input type="range" min="1200" max="4000" step="50" value={goals.calories} onChange={e => handleGoalChange('calories', e.target.value)} className="w-full" />
+              </div>
+              <GoalItem label="Protein" value={`${goals.protein} g`} />
+              <GoalItem label="Carbs" value={`${goals.carbs} g`} />
+              <GoalItem label="Fat" value={`${goals.fat} g`} />
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-xl font-bold text-gray-800 dark:text-gray-200 mb-4">Settings</h3>
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md p-4 space-y-1">
+              <SettingItem label="Account" />
+              <SettingItem label="Notifications" />
+              <SettingItem label="Privacy" />
+              <div className="flex justify-between items-center p-3">
+                <span className="text-gray-700 dark:text-gray-300">Dark Mode</span>
+                <button onClick={toggleTheme} className={`w-12 h-6 rounded-full p-1 flex items-center transition-colors ${theme === 'dark' ? 'bg-pink-500 justify-end' : 'bg-gray-300 justify-start'}`}>
+                  <div className="w-4 h-4 bg-white rounded-full shadow-md"></div>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // Scan Screen Component with Gemini API Integration
+    const Scan = ({ onLogMeal }) => {
+      const [isLoading, setIsLoading] = useState(false);
+      const [scanResult, setScanResult] = useState(null);
+      const [error, setError] = useState(null);
+      const [imagePreview, setImagePreview] = useState(null);
+      const [selectedMood, setSelectedMood] = useState(null);
+      const fileInputRef = useRef(null);
+
+      const fileToBase64 = (file) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = error => reject(error);
+      });
+
+      const handleImageChange = (event) => {
+        const file = event.target.files[0];
+        if (file) {
+          const previewUrl = URL.createObjectURL(file);
+          setImagePreview(previewUrl);
+          setScanResult(null);
+          setError(null);
+          setSelectedMood(null);
+          handleScan(file, previewUrl);
+        }
+      };
+
+      const handleScan = async (file, previewUrl) => {
+        setIsLoading(true);
+        setError(null);
+        try {
+          const base64ImageData = await fileToBase64(file);
+          const prompt = `Analyze the food in this image.
+1. Identify the main dish.
+2. Break it down into primary ingredients and estimate calories for each.
+3. Provide a total nutritional summary (calories, protein, carbs, fat).
+4. Offer a single, actionable, and encouraging "health_tip" to make this meal healthier next time.
+Respond ONLY with a valid JSON object in this format:
+{
+  "name": "Overall Dish Name",
+  "total_calories": 550,
+  "total_protein": 30.5,
+  "total_carbs": 45.2,
+  "total_fat": 25.8,
+  "ingredients": [
+    {"name": "Ingredient 1", "calories": 200},
+    {"name": "Ingredient 2", "calories": 150}
+  ],
+  "health_tip": "A short, encouraging tip to improve the meal."
+}`;
+
+          const payload = {
+            contents: [
+              {
+                parts: [
+                  { text: prompt },
+                  { inlineData: { mimeType: file.type, data: base64ImageData } }
+                ]
+              }
+            ],
+          };
+
+          const response = await fetch(GEMINI_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          if (!response.ok) {
+            throw new Error(`API Error: ${response.status} ${response.statusText}`);
+          }
+
+          const result = await response.json();
+          const textResponse = result.candidates[0].content.parts[0].text || '';
+          const jsonString = textResponse.replace(/```json|```/g, '').trim();
+          const data = JSON.parse(jsonString);
+          data.image = previewUrl;
+          setScanResult(data);
+        } catch (err) {
+          console.error("Gemini API call failed:", err);
+          setError('Could not analyze the image. Please try again.');
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      return (
+        <div className="p-6 pb-24 flex flex-col items-center">
+          <header className="mb-6 text-center">
+            <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-200">AI Food Scanner</h1>
+            <p className="text-gray-500 dark:text-gray-400">Get instant nutritional info and health tips</p>
+          </header>
+
+          <div className="w-full max-w-sm">
+            <div
+              className="relative w-full h-80 bg-gray-200 dark:bg-gray-700 rounded-2xl mb-6 flex items-center justify-center overflow-hidden cursor-pointer"
+              onClick={() => fileInputRef.current.click()}
+            >
+              {imagePreview ? (
+                <img src={imagePreview} alt="Meal preview" className="w-full h-full object-cover" />
+              ) : (
+                <div className="text-center text-gray-500 dark:text-gray-400">
+                  <span className="text-4xl">📷</span>
+                  <p>Tap to take a photo</p>
+                </div>
+              )}
+              {isLoading && (
+                <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white">
+                  Analyzing...
+                </div>
+              )}
+            </div>
+
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              ref={fileInputRef}
+              onChange={handleImageChange}
+              className="hidden"
+            />
+
+            {error && <div className="my-4 text-center text-red-500 bg-red-100 p-3 rounded-lg">{error}</div>}
+
+            {scanResult && (
+              <div className="mt-6 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-md animate-fade-in">
+                <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-200 mb-2">{scanResult.name}</h2>
+                <p className="text-lg font-semibold text-gray-600 dark:text-gray-300 mb-4">{scanResult.total_calories} kcal</p>
+
+                {scanResult.health_tip && (
+                  <div className="mb-4 p-4 bg-yellow-100 text-yellow-800 rounded-lg flex items-start">
+                    <span className="text-2xl mr-3">💡</span>
+                    <div>
+                      <h3 className="font-bold">Plate Perfecter Tip</h3>
+                      <p>{scanResult.health_tip}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Mindful Journal Section */}
+                <div className="my-4">
+                  <h3 className="font-bold text-gray-700 dark:text-gray-300 mb-2 text-center">How do you feel after this meal?</h3>
+                  <div className="flex justify-around">
+                    {['Energized', 'Happy', 'Sluggish', 'Bloated'].map(mood => (
+                      <button
+                        key={mood}
+                        onClick={() => setSelectedMood(mood)}
+                        className={`p-2 rounded-lg border-2 ${selectedMood === mood ? 'border-pink-500' : 'border-transparent'}`}
+                      >
+                        <span className="text-3xl">{{ Energized: '⚡️', Happy: '😊', Sluggish: '😴', Bloated: '🤢' }[mood]}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3 mb-4 text-gray-800 dark:text-gray-200">
+                  <h3 className="font-bold text-gray-700 dark:text-gray-300">Nutritional Summary:</h3>
+                  <p><strong>Protein:</strong> {scanResult.total_protein} g</p>
+                  <p><strong>Carbs:</strong> {scanResult.total_carbs} g</p>
+                  <p><strong>Fat:</strong> {scanResult.total_fat} g</p>
+                </div>
+
+                {scanResult.ingredients && scanResult.ingredients.length > 0 && (
+                  <div className="space-y-3 mb-4 text-gray-800 dark:text-gray-200">
+                    <h3 className="font-bold text-gray-700 dark:text-gray-300">Ingredient Breakdown:</h3>
+                    {scanResult.ingredients.map((item, index) => (
+                      <div key={index} className="flex justify-between">
+                        <span>{item.name}</span>
+                        <span>{item.calories} kcal</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <button
+                  onClick={() => onLogMeal({
+                    ...scanResult,
+                    calories: scanResult.total_calories,
+                    protein: scanResult.total_protein,
+                    carbs: scanResult.total_carbs,
+                    fat: scanResult.total_fat,
+                    image: scanResult.image,
+                    mood: selectedMood
+                  })}
+                  className="w-full mt-4 bg-green-500 text-white font-bold py-3 rounded-xl hover:bg-green-600 transition-colors"
+                >
+                  Log this Meal
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    // Meal Planner Screen Component
+    const MealPlanner = ({ goals }) => {
+      const [preferences, setPreferences] = useState({ cuisine: '', diet: '', calories: goals.calories, allergies: [] });
+      const [mealPlan, setMealPlan] = useState(null);
+      const [isLoading, setIsLoading] = useState(false);
+      const [error, setError] = useState(null);
+
+      const handlePreferenceChange = (key, value) => {
+        setPreferences(prev => ({ ...prev, [key]: value }));
+      };
+
+      const handleAllergyChange = (allergy) => {
+        setPreferences(prev => {
+          const newAllergies = prev.allergies.includes(allergy)
+            ? prev.allergies.filter(a => a !== allergy)
+            : [...prev.allergies, allergy];
+          return { ...prev, allergies: newAllergies };
+        });
+      };
+
+      const generateMealPlan = async () => {
+        setIsLoading(true);
+        setError(null);
+        setMealPlan(null);
+        try {
+          const prompt = `Create a one-day meal plan based on these preferences:
+- Cuisine: ${preferences.cuisine || 'Any'}
+- Diet: ${preferences.diet || 'Standard'}
+- Calorie Target: ${preferences.calories} kcal
+- Allergies: ${preferences.allergies.join(', ') || 'None'}
+Provide a response as a valid JSON object with breakfast, lunch, and dinner. Each meal should have a name, ingredients list, and instructions. The total calories for the day should be approximately ${preferences.calories}.
+Format:
+{
+  "breakfast": {"name": "...", "ingredients": ["..."], "instructions": ["..."]},
+  "lunch": {"name": "...", "ingredients": ["..."], "instructions": ["..."]},
+  "dinner": {"name": "...", "ingredients": ["..."], "instructions": ["..."]}
+}`;
+
+          const payload = { contents: [{ parts: [{ text: prompt }] }] };
+
+          const response = await fetch(GEMINI_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            throw new Error(`API Error: ${response.status} ${response.statusText}`);
+          }
+
+          const result = await response.json();
+          const textResponse = result.candidates[0].content.parts[0].text || '';
+          const jsonString = textResponse.replace(/```json|```/g, '').trim();
+          const data = JSON.parse(jsonString);
+          setMealPlan(data);
+        } catch (err) {
+          console.error("Meal plan generation failed:", err);
+          setError("Could not generate a meal plan. Please try again.");
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      return (
+        <div className="p-6 pb-24">
+          <header className="mb-6 text-center">
+            <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-200">AI Meal Planner</h1>
+            <p className="text-gray-500 dark:text-gray-400">Get a personalized meal plan</p>
+          </header>
+
+          {!mealPlan && (
+            <div className="max-w-md mx-auto">
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-md space-y-4">
+                <div>
+                  <h3 className="font-semibold mb-2 text-gray-800 dark:text-gray-200">Cuisine Type</h3>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['International', 'Indian', 'Mediterranean', 'Asian', 'Mexican', 'Italian'].map(c => (
+                      <button
+                        key={c}
+                        onClick={() => handlePreferenceChange('cuisine', c)}
+                        className={`p-2 rounded-lg border dark:border-gray-700 ${preferences.cuisine === c ? 'bg-pink-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="font-semibold mb-2 text-gray-800 dark:text-gray-200">Diet Type</h3>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['Veg', 'Non-Veg', 'Vegan'].map(d => (
+                      <button
+                        key={d}
+                        onClick={() => handlePreferenceChange('diet', d)}
+                        className={`p-2 rounded-lg border dark:border-gray-700 ${preferences.diet === d ? 'bg-pink-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="font-semibold mb-2 text-gray-800 dark:text-gray-200">Daily Calorie Target: {preferences.calories} kcal</h3>
+                  <input type="range" min="1200" max="4000" step="50" value={preferences.calories} onChange={e => handlePreferenceChange('calories', e.target.value)} className="w-full" />
+                </div>
+
+                <div>
+                  <h3 className="font-semibold mb-2 text-gray-800 dark:text-gray-200">Allergies & Restrictions</h3>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['Nuts', 'Dairy', 'Gluten', 'Eggs', 'Seafood', 'Soy'].map(a => (
+                      <button
+                        key={a}
+                        onClick={() => handleAllergyChange(a)}
+                        className={`p-2 rounded-lg border dark:border-gray-700 ${preferences.allergies.includes(a) ? 'bg-pink-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}
+                      >
+                        {a}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={generateMealPlan}
+                disabled={isLoading}
+                className="w-full mt-6 bg-green-500 text-white font-bold py-4 rounded-2xl shadow-lg hover:bg-green-600 transition-colors disabled:bg-gray-400"
+              >
+                {isLoading ? 'Generating...' : 'Generate Meal Plan'}
+              </button>
+
+              {error && <div className="mt-4 text-center text-red-500">{error}</div>}
+            </div>
+          )}
+
+          {mealPlan && (
+            <div className="animate-fade-in">
+              <button onClick={() => setMealPlan(null)} className="mb-4 text-pink-500 font-semibold">&larr; Back to Preferences</button>
+              <div className="space-y-6">
+                <MealPlanDisplay mealType="Breakfast" meal={mealPlan.breakfast} />
+                <MealPlanDisplay mealType="Lunch" meal={mealPlan.lunch} />
+                <MealPlanDisplay mealType="Dinner" meal={mealPlan.dinner} />
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // Workout Planner Screen Component
+    const WorkoutPlanner = () => {
+      const [preferences, setPreferences] = useState({ goal: '', type: '', level: '', equipment: [] });
+      const [workoutPlan, setWorkoutPlan] = useState(null);
+      const [isLoading, setIsLoading] = useState(false);
+      const [error, setError] = useState(null);
+
+      const handlePreferenceChange = (key, value) => {
+        setPreferences(prev => ({ ...prev, [key]: value }));
+      };
+
+      const handleEquipmentChange = (item) => {
+        setPreferences(prev => {
+          const newEquipment = prev.equipment.includes(item)
+            ? prev.equipment.filter(e => e !== item)
+            : [...prev.equipment, item];
+          return { ...prev, equipment: newEquipment };
+        });
+      };
+
+      const generateWorkoutPlan = async () => {
+        setIsLoading(true);
+        setError(null);
+        setWorkoutPlan(null);
+        try {
+          const prompt = `Create a workout plan based on these user preferences:
+- Fitness Goal: ${preferences.goal || 'General Fitness'}
+- Workout Type: ${preferences.type || 'Full Body'}
+- Experience Level: ${preferences.level || 'Beginner'}
+- Available Equipment: ${preferences.equipment.join(', ') || 'None (Bodyweight)'}
+Provide a response as a valid JSON object. The plan should have a name and a list of exercises. Each exercise must include a name, sets, reps, and instructions.
+Format:
+{
+  "plan_name": "Personalized Workout Plan Name",
+  "exercises": [
+    {"name": "...", "sets": "...", "reps": "...", "instructions": "..."},
+    {"name": "...", "sets": "...", "reps": "...", "instructions": "..."}
+  ]
+}`;
+
+          const payload = { contents: [{ parts: [{ text: prompt }] }] };
+
+          const response = await fetch(GEMINI_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          if (!response.ok) {
+            throw new Error(`API Error: ${response.status} ${response.statusText}`);
+          }
+
+          const result = await response.json();
+          const textResponse = result.candidates[0].content.parts[0].text || '';
+          const jsonString = textResponse.replace(/```json|```/g, '').trim();
+          const data = JSON.parse(jsonString);
+          setWorkoutPlan(data);
+        } catch (err) {
+          console.error("Workout plan generation failed:", err);
+          setError("Could not generate a workout plan. Please try again.");
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      return (
+        <div className="p-6 pb-24">
+          <header className="mb-6 text-center">
+            <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-200">AI Workout Planner</h1>
+            <p className="text-gray-500 dark:text-gray-400">Get a workout plan tailored to you</p>
+          </header>
+
+          {!workoutPlan && (
+            <div className="max-w-md mx-auto">
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-md space-y-4">
+                {/* Fitness Goal */}
+                <div>
+                  <h3 className="font-semibold mb-2 text-gray-800 dark:text-gray-200">Fitness Goal</h3>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['Weight Loss', 'Muscle Gain', 'Endurance'].map(g => (
+                      <button
+                        key={g}
+                        onClick={() => handlePreferenceChange('goal', g)}
+                        className={`p-2 rounded-lg border dark:border-gray-700 ${preferences.goal === g ? 'bg-pink-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}
+                      >
+                        {g}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Workout Type */}
+                <div>
+                  <h3 className="font-semibold mb-2 text-gray-800 dark:text-gray-200">Workout Type</h3>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['Full Body', 'Upper Body', 'Lower Body'].map(t => (
+                      <button
+                        key={t}
+                        onClick={() => handlePreferenceChange('type', t)}
+                        className={`p-2 rounded-lg border dark:border-gray-700 ${preferences.type === t ? 'bg-pink-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Experience Level */}
+                <div>
+                  <h3 className="font-semibold mb-2 text-gray-800 dark:text-gray-200">Experience Level</h3>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['Beginner', 'Intermediate', 'Advanced'].map(l => (
+                      <button
+                        key={l}
+                        onClick={() => handlePreferenceChange('level', l)}
+                        className={`p-2 rounded-lg border dark:border-gray-700 ${preferences.level === l ? 'bg-pink-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}
+                      >
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Equipment */}
+                <div>
+                  <h3 className="font-semibold mb-2 text-gray-800 dark:text-gray-200">Available Equipment</h3>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['Bodyweight', 'Dumbbells', 'Barbell', 'Kettlebell', 'Bands', 'Machine'].map(e => (
+                      <button
+                        key={e}
+                        onClick={() => handleEquipmentChange(e)}
+                        className={`p-2 rounded-lg border dark:border-gray-700 ${preferences.equipment.includes(e) ? 'bg-pink-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}
+                      >
+                        {e}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={generateWorkoutPlan}
+                disabled={isLoading}
+                className="w-full mt-6 bg-green-500 text-white font-bold py-4 rounded-2xl shadow-lg hover:bg-green-600 transition-colors disabled:bg-gray-400"
+              >
+                {isLoading ? 'Generating...' : 'Generate Workout Plan'}
+              </button>
+
+              {error && <div className="mt-4 text-center text-red-500">{error}</div>}
+            </div>
+          )}
+
+          {workoutPlan && (
+            <div className="animate-fade-in">
+              <button onClick={() => setWorkoutPlan(null)} className="mb-4 text-pink-500 font-semibold">&larr; Back to Preferences</button>
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-md">
+                <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-200 mb-4">{workoutPlan.plan_name}</h2>
+                <div className="space-y-4">
+                  {workoutPlan.exercises.map((ex, i) => (
+                    <div key={i} className="border-b dark:border-gray-700 pb-2">
+                      <h3 className="font-bold text-gray-800 dark:text-gray-200">{ex.name}</h3>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">Sets: {ex.sets} | Reps: {ex.reps}</p>
+                      <p className="mt-1 text-sm text-gray-800 dark:text-gray-200">{ex.instructions}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // AI Coach Screen Component
+    const Coach = ({ dailyIntake, recentMeals }) => {
+      const [messages, setMessages] = useState([{ text: "Hello! I'm your AI Health Coach. Ask me anything about your nutrition or meals.", sender: 'ai' }]);
+      const [input, setInput] = useState('');
+      const [isLoading, setIsLoading] = useState(false);
+      const chatEndRef = useRef(null);
+      const [attachment, setAttachment] = useState(null);
+      const [attachmentPreview, setAttachmentPreview] = useState(null);
+      const fileInputRef = useRef(null);
+
+      useEffect(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, [messages]);
+
+      const fileToBase64 = (file) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = error => reject(error);
+      });
+
+      const handleAttachmentChange = (event) => {
+        const file = event.target.files[0];
+        if (file) {
+          setAttachment(file);
+          setAttachmentPreview(URL.createObjectURL(file));
+        }
+      };
+
+      const handleSend = async () => {
+        if (!input.trim() && !attachment) return;
+
+        const userMessage = { text: input, sender: 'user', attachment: attachmentPreview };
+        setMessages(prev => [...prev, userMessage]);
+        setInput('');
+        setAttachment(null);
+        setAttachmentPreview(null);
+        setIsLoading(true);
+
+        try {
+          const mealContext = recentMeals.map(m => `${m.name} (Felt: ${m.mood || 'Not specified'})`).join(', ');
+          let prompt = `You are an AI Health Coach. The user's current daily intake is:
+- Calories: ${dailyIntake.calories.toFixed(0)}
+- Protein: ${dailyIntake.protein.toFixed(1)}g
+- Carbs: ${dailyIntake.carbs.toFixed(1)}g
+- Fat: ${dailyIntake.fat.toFixed(1)}g
+Their recent meals and how they felt after them: ${mealContext || 'None logged'}.
+Based on this, analyze patterns and answer the user's question in a helpful and encouraging tone. Do not include a disclaimer in your response.
+User's question: "${userMessage.text}"`;
+
+          const parts = [{ text: prompt }];
+
+          if (attachment) {
+            const base64ImageData = await fileToBase64(attachment);
+            parts.push({ inlineData: { mimeType: attachment.type, data: base64ImageData } });
+            prompt += "\n\nPlease also consider the attached document in your analysis.";
+          }
+
+          const payload = { contents: [{ parts }] };
+
+          const response = await fetch(GEMINI_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          if (!response.ok) {
+            throw new Error(`API Error: ${response.status} ${response.statusText}`);
+          }
+
+          const result = await response.json();
+          const aiResponse = result.candidates[0].content.parts[0].text;
+          setMessages(prev => [...prev, { text: aiResponse, sender: 'ai' }]);
+        } catch (err) {
+          console.error("Chatbot error:", err);
+          setMessages(prev => [...prev, { text: "Sorry, I'm having trouble connecting. Please try again.", sender: 'ai' }]);
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      return (
+        <div className="p-6 pb-24 h-screen flex flex-col">
+          <header className="mb-6 text-center">
+            <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-200">AI Health Coach</h1>
+            <p className="text-gray-500 dark:text-gray-400">Your personal health assistant</p>
+          </header>
+
+          <div className="flex-grow overflow-y-auto bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-md">
+            <div className="text-center text-xs text-gray-400 dark:text-gray-500 p-2 mb-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
+              Disclaimer: This AI is for informational purposes only and is not a substitute for professional medical advice. Always consult a doctor for health concerns.
+            </div>
+
+            {messages.map((msg, i) => (
+              <div key={i} className={`flex mb-3 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`p-3 rounded-lg max-w-xs ${msg.sender === 'user' ? 'bg-pink-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}`}>
+                  {msg.attachment && <img src={msg.attachment} alt="attachment" className="rounded-lg mb-2 max-w-full h-auto" />}
+                  {msg.text}
+                </div>
+              </div>
+            ))}
+            <div ref={chatEndRef} />
+          </div>
+
+          {attachmentPreview && (
+            <div className="mt-2 p-2 bg-gray-200 dark:bg-gray-700 rounded-lg flex items-center justify-between">
+              <img src={attachmentPreview} alt="preview" className="w-12 h-12 rounded-md object-cover" />
+              <button onClick={() => { setAttachment(null); setAttachmentPreview(null); }} className="text-red-500 font-bold">Remove</button>
+            </div>
+          )}
+
+          <div className="mt-4 flex">
+            <input type="file" accept="image/*" ref={fileInputRef} onChange={handleAttachmentChange} className="hidden" />
+            <button onClick={() => fileInputRef.current.click()} className="p-3 border dark:border-gray-700 rounded-l-lg bg-gray-100 dark:bg-gray-700">📎</button>
+            <input
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSend()}
+              placeholder="Ask a question..."
+              className="flex-grow p-3 border-t border-b dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-pink-500 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200"
+              disabled={isLoading}
+            />
+            <button onClick={handleSend} disabled={isLoading} className="bg-pink-500 text-white p-3 rounded-r-lg font-bold">
+              {isLoading ? '...' : 'Send'}
+            </button>
+          </div>
+        </div>
+      );
+    };
+
+    // Progress Screen Component
+    const Progress = ({ dailyHistory }) => {
+      const [currentDate, setCurrentDate] = useState(new Date());
+      const [selectedDay, setSelectedDay] = useState(null);
+
+      const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+      const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+      const startDay = startOfMonth.getDay();
+      const daysInMonth = endOfMonth.getDate();
+
+      const getScoreColor = (score) => {
+        if (score > 80) return 'bg-green-500';
+        if (score > 60) return 'bg-yellow-500';
+        return 'bg-red-500';
+      };
+
+      return (
+        <div className="p-6 pb-24">
+          <header className="mb-6 text-center">
+            <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-200">Your Progress</h1>
+            <p className="text-gray-500 dark:text-gray-400">Review your monthly health scores</p>
+          </header>
+
+          <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-md">
+            <div className="flex justify-between items-center mb-4">
+              <button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() - 1)))} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700">&larr;</button>
+              <h2 className="font-bold text-lg text-gray-800 dark:text-gray-200">{currentDate.toLocaleString('default', { month: 'long', year: 'numeric' })}</h2>
+              <button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() + 1)))} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700">&rarr;</button>
+            </div>
+
+            <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-gray-500 dark:text-gray-400 border-b dark:border-gray-700 pb-2 mb-2">
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => <div key={day}>{day}</div>)}
+            </div>
+
+            <div className="grid grid-cols-7 gap-1">
+              {Array.from({ length: startDay }).map((_, i) => <div key={`empty-${i}`}></div>)}
+              {Array.from({ length: daysInMonth }).map((_, day) => {
+                const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), day + 1);
+                const dateString = date.toISOString().split('T')[0];
+                const data = dailyHistory[dateString];
+                return (
+                  <div key={day} onClick={() => data && setSelectedDay({date: dateString, ...data})} className="p-1 aspect-square flex items-center justify-center cursor-pointer">
+                    {data ? (
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-lg ${getScoreColor(data.score)}`}>
+                        {data.score}
+                      </div>
+                    ) : (
+                      <span className="text-gray-400 dark:text-gray-600">{day + 1}</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-6 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-md">
+            <h3 className="text-xl font-bold text-gray-800 dark:text-gray-200 mb-2">How is the Health Score Calculated?</h3>
+            <p className="text-gray-600 dark:text-gray-400">
+              Your daily Health Score is a balanced summary of your key wellness metrics. It's weighted to reflect the importance of each area:
+              <strong className="text-pink-500"> 50% Nutrition</strong> (how close you are to your calorie goal),
+              <strong className="text-pink-500"> 30% Activity</strong> (meeting your movement goal), and
+              <strong className="text-pink-500"> 20% Hydration</strong> (hitting your water target).
+            </p>
+          </div>
+
+          {selectedDay && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 animate-fade-in" onClick={() => setSelectedDay(null)}>
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-xl max-w-sm w-full" onClick={e => e.stopPropagation()}>
+                <h3 className="text-xl font-bold text-gray-800 dark:text-gray-200 mb-4">Summary for {new Date(selectedDay.date).toLocaleDateString()}</h3>
+                <p><strong>Health Score:</strong> {selectedDay.score}</p>
+                <p><strong>Calories:</strong> {selectedDay.intake.calories.toFixed(0)}</p>
+                <p><strong>Activity:</strong> {selectedDay.intake.activity} mins</p>
+                <p><strong>Water:</strong> {selectedDay.intake.water} glasses</p>
+                <h4 className="font-bold mt-2">Meals:</h4>
+                <ul className="list-disc list-inside">
+                  {selectedDay.meals.map(m => <li key={m.id}>{m.name}</li>)}
+                </ul>
+                <button onClick={() => setSelectedDay(null)} className="w-full mt-4 bg-pink-500 text-white font-bold py-2 rounded-xl">Close</button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // --- Helper Components ---
+
+    // Activity Timer Component (for Dashboard)
+    const ActivityTimer = ({ onLogActivity }) => {
+      const [timeLeft, setTimeLeft] = useState(0);
+      const [isActive, setIsActive] = useState(false);
+      const [duration, setDuration] = useState(0);
+      const timerRef = useRef(null);
+
+      useEffect(() => {
+        if (timeLeft > 0 && isActive) {
+          timerRef.current = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
+        } else if (timeLeft === 0 && isActive) {
+          setIsActive(false);
+          onLogActivity({ minutes: duration });
+          if ('Notification' in window && Notification.permission === "granted") {
+            new Notification("Activity Complete!", { body: `Great job! You've logged ${duration} minutes.` });
+          }
+        }
+        return () => clearTimeout(timerRef.current);
+      }, [timeLeft, isActive, onLogActivity, duration]);
+
+      const startTimer = (minutes) => {
+        setTimeLeft(minutes * 60);
+        setDuration(minutes);
+        setIsActive(true);
+      };
+
+      const formatTime = (seconds) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+      };
+
+      if (isActive) {
+        return <div className="text-center font-bold text-3xl text-pink-500">{formatTime(timeLeft)}</div>;
+      }
+
+      return (
+        <div className="space-y-2">
+          <p className="font-semibold text-gray-800 dark:text-gray-200 text-center">Start a quick session:</p>
+          <div className="grid grid-cols-3 gap-2">
+            <button onClick={() => startTimer(10)} className="p-2 bg-pink-500 text-white rounded-lg">10 min</button>
+            <button onClick={() => startTimer(20)} className="p-2 bg-pink-500 text-white rounded-lg">20 min</button>
+            <button onClick={() => startTimer(30)} className="p-2 bg-pink-500 text-white rounded-lg">30 min</button>
+          </div>
+        </div>
+      );
+    };
+
+    // Water Tracker Component (for Dashboard)
+    const WaterTracker = ({ onLogWater, dailyIntake, goals }) => {
+      useEffect(() => {
+        const interval = setInterval(() => {
+          if ('Notification' in window && Notification.permission === "granted") {
+            new Notification("Stay Hydrated!", { body: "Time for a glass of water to keep you going." });
+          }
+        }, 2 * 60 * 60 * 1000); // Remind every 2 hours
+        return () => clearInterval(interval);
+      }, []);
+
+      return (
+        <div>
+          <p className="font-semibold text-gray-800 dark:text-gray-200 text-center">Water Intake: {dailyIntake.water} / {goals.water} glasses</p>
+          <button onClick={onLogWater} className="w-full mt-2 bg-blue-500 text-white font-bold py-2 rounded-xl">Log a Glass</button>
+        </div>
+      );
+    };
+
+    const MacroCard = ({ title, value, goal, unit, color }) => (
+      <div className="bg-white dark:bg-gray-800 rounded-2xl p-4 flex flex-col items-center justify-center shadow-md">
+        <p className={`font-bold ${color}`}>{title}</p>
+        <p className="text-xl font-bold my-1 text-gray-800 dark:text-gray-200">{Math.round(value)}{unit}</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400">Goal: {goal}{unit}</p>
+      </div>
+    );
+
+    const MealCard = ({ meal }) => (
+      <div className="flex items-center bg-white dark:bg-gray-800 rounded-2xl p-3 shadow-md">
+        <img src={meal.image} alt={meal.name} className="w-16 h-16 rounded-lg" />
+        <div className="ml-4 flex-grow">
+          <p className="font-bold text-gray-800 dark:text-gray-200">{meal.name}</p>
+          <p className="text-gray-500 dark:text-gray-400">{Math.round(meal.calories)} kcal</p>
+        </div>
+        {meal.mood && (
+          <span className="text-3xl">{{ Energized: '⚡️', Happy: '😊', Sluggish: '😴', Bloated: '🤢' }[meal.mood]}</span>
+        )}
+      </div>
+    );
+
+    const GoalItem = ({ label, value }) => (
+      <div className="flex justify-between items-center p-2">
+        <p className="text-gray-600 dark:text-gray-300">{label}</p>
+        <p className="font-bold text-gray-800 dark:text-gray-200">{value}</p>
+      </div>
+    );
+
+    const SettingItem = ({ label }) => (
+      <button className="w-full text-left p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors">
+        {label}
+      </button>
+    );
+
+    const MealPlanDisplay = ({ mealType, meal }) => (
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-md">
+        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-200 mb-4">{mealType}: {meal.name}</h2>
+        <div className="grid md:grid-cols-2 gap-6">
+          <div>
+            <h3 className="font-semibold mb-2 text-gray-800 dark:text-gray-200">Ingredients:</h3>
+            <ul className="list-disc list-inside text-gray-600 dark:text-gray-300">
+              {meal.ingredients.map((item, i) => <li key={i}>{item}</li>)}
+            </ul>
+          </div>
+          <div>
+            <h3 className="font-semibold mb-2 text-gray-800 dark:text-gray-200">Instructions:</h3>
+            <ol className="list-decimal list-inside text-gray-600 dark:text-gray-300 space-y-1">
+              {meal.instructions.map((step, i) => <li key={i}>{step}</li>)}
+            </ol>
+          </div>
+        </div>
+      </div>
+    );
+
+
+    const BottomNavBar = ({ screen, setScreen }) => (
+      <nav className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm shadow-[0_-2px_10px_rgba(0,0,0,0.05)] dark:shadow-[0_-2px_10px_rgba(0,0,0,0.2)] h-20 flex justify-around items-center px-4">
+        <button onClick={() => setScreen('dashboard')} className={`font-semibold transition-colors ${screen === 'dashboard' ? 'text-pink-500' : 'text-gray-400'}`}> Home </button>
+        <button onClick={() => setScreen('planner')} className={`font-semibold transition-colors ${screen === 'planner' ? 'text-pink-500' : 'text-gray-400'}`}> Planner </button>
+        <button onClick={() => setScreen('progress')} className={`font-semibold transition-colors ${screen === 'progress' ? 'text-pink-500' : 'text-gray-400'}`}> Progress </button>
+        <button onClick={() => setScreen('scan')} className="bg-pink-500 text-white w-14 h-14 rounded-full flex items-center justify-center text-lg font-bold shadow-lg"> Cal </button>
+        <button onClick={() => setScreen('workout')} className={`font-semibold transition-colors ${screen === 'workout' ? 'text-pink-500' : 'text-gray-400'}`}> Workout </button>
+        <button onClick={() => setScreen('coach')} className={`font-semibold transition-colors ${screen === 'coach' ? 'text-pink-500' : 'text-gray-400'}`}> Coach </button>
+        <button onClick={() => setScreen('profile')} className={`font-semibold transition-colors ${screen === 'profile' ? 'text-pink-500' : 'text-gray-400'}`}> Profile </button>
+      </nav>
+    );
+
+    // --- Mount App ---
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

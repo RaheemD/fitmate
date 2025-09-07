@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Workouts — Single File App</title>
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class'
+    }
+  </script>
+
+  <style>
+    :root{ --bg:#f9fafb; --bg-dark:#111827; --card:#ffffff; --card-dark:#1f2937; --muted:#9ca3af; --accent:#ec4899; }
+    html,body{ height:100%; color:#111827; font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto; -webkit-font-smoothing:antialiased;}
+    .dark html,.dark body{ color:#f9fafb; }
+    .hero-pattern {
+      background-image:
+        linear-gradient(180deg, rgba(236,72,153,0.1), rgba(59,130,246,0.1)),
+        url('data:image/svg+xml;utf8,\
+        <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700">\
+        <defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="%23ec4899" stop-opacity="0.3"/><stop offset="1" stop-color="%233b82f6" stop-opacity="0.3"/></linearGradient></defs>\
+        <rect width="100%" height="100%" fill="url(%23g)"/><g opacity="0.03" fill="%23000"><circle cx="220" cy="200" r="180"/><circle cx="900" cy="150" r="260"/><circle cx="600" cy="500" r="300"/></g></svg>');
+      background-size: cover;
+      background-position: center;
+    }
+    .card-stats { background: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,255,255,0.95)); backdrop-filter: blur(6px); }
+    .dark .card-stats { background: linear-gradient(180deg, rgba(31,41,55,0.9), rgba(31,41,55,0.95)); }
+    .hidden-view { display:none; }
+    .active-view { display:block; }
+    .big-circle { width:180px;height:180px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:2.4rem;background: radial-gradient(circle at 30% 30%, #10b981, #059669);box-shadow:0 6px 18px rgba(0,0,0,0.1); }
+    .dark .big-circle { box-shadow:0 6px 18px rgba(0,0,0,0.6); }
+    .progress-track { height:6px; background: rgba(156,163,175,0.3); border-radius:99px; overflow:hidden; }
+    .progress-fill { height:100%; background: linear-gradient(90deg,#ec4899,#3b82f6); width:0%; transition:width .25s linear; }
+    .player-overlay { min-height:100vh; }
+    .chip:focus { outline: 2px solid rgba(236,72,153,0.18); outline-offset: 2px; }
+    .bottom-safe { padding-bottom: env(safe-area-inset-bottom); }
+    @media (min-width:1024px){ .page-title { font-size:3rem; } .card-title{ font-size:1.5rem; } }
+  </style>
+    <script>
+      // Dark mode detection - must run before body renders
+      // Sync with index.html dark mode settings
+      const isDarkMode = localStorage.getItem('fitmate-dark-mode') === 'true';
+      if (isDarkMode) {
+        document.documentElement.classList.add('dark')
+      } else {
+        document.documentElement.classList.remove('dark')
+      }
+    </script>
+  </head>
+<body class="bottom-safe bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white">
+
+  <!-- APP CONTAINER -->
+  <div id="app" class="max-w-3xl mx-auto px-4 pt-6 pb-28">
+
+    <!-- VIEW: Workouts List (default) -->
+    <section id="view-list" class="active-view">
+      <header class="mb-4">
+          <h1 class="text-3xl font-bold text-gray-800 dark:text-gray-200">🏋️ Workouts</h1>
+          <p class="text-gray-600 dark:text-gray-400 mt-2">Choose your training for today</p>
+        </header>
+
+      <div id="workouts" class="space-y-6 mt-6"></div>
+    </section>
+
+    <!-- VIEW: Detail -->
+    <section id="view-detail" class="hidden-view">
+      <div class="flex items-center gap-3 mb-4">
+        <button id="detail-back" class="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white" title="Back to list">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+        <h1 id="detail-title" class="text-2xl font-extrabold text-gray-900 dark:text-white">Workout Title</h1>
+      </div>
+
+      <p id="detail-desc" class="text-gray-600 dark:text-gray-400 mb-3">Workout description</p>
+
+      <div class="flex items-center gap-3 mb-6">
+        <div class="flex items-center gap-1 text-gray-700 dark:text-gray-200">
+          <svg class="w-5 h-5 text-pink-500" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          <span id="detail-duration">20 min</span>
+        </div>
+        <div class="flex items-center gap-1 text-gray-700 dark:text-gray-200">
+          <svg class="w-5 h-5 text-pink-500" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7" opacity="0.3"/></svg>
+          <span id="detail-count">5 exercises</span>
+        </div>
+        <span id="detail-badge" class="ml-auto text-xs font-bold px-3 py-1 rounded-full bg-green-500 text-black">Beginner</span>
+      </div>
+
+      <section>
+        <h2 class="text-lg font-semibold mb-3">Exercises</h2>
+        <div id="detail-exList" class="space-y-4"></div>
+      </section>
+
+      <div class="mt-8">
+        <button id="detail-start" class="w-full py-4 rounded-xl font-semibold text-white text-lg bg-pink-500 hover:bg-pink-600 flex items-center justify-center gap-2 shadow-lg transition-colors">
+          <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 5v14l11-7z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Start Workout
+        </button>
+      </div>
+    </section>
+
+    <!-- VIEW: Player -->
+    <section id="view-player" class="hidden-view player-overlay bg-gray-50 dark:bg-gray-900">
+      <div class="px-4 pt-6 pb-3">
+        <div class="flex items-center gap-3">
+          <button id="player-close" class="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white" title="Close workout">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+
+          <div class="flex-1 text-center">
+            <div id="player-progressLabel" class="text-sm text-gray-600 dark:text-gray-300">1 of 5</div>
+            <div class="mt-2 progress-track">
+              <div id="player-progressFill" class="progress-fill"></div>
+            </div>
+          </div>
+
+          <button id="player-voice" class="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white" title="Toggle voice">
+            <svg id="player-voice-icon" class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10a3 3 0 1 0 0-6V3z"></path></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="flex-1 flex flex-col items-center px-6 pt-6 pb-8 overflow-auto">
+        <div class="inline-block bg-transparent"><span class="text-xs font-semibold px-4 py-2 rounded-full bg-green-500 text-black">EXERCISE</span></div>
+
+        <h2 id="player-title" class="text-3xl font-extrabold mt-4 text-center text-gray-900 dark:text-white">Jumping Jacks</h2>
+        <p id="player-setInfo" class="text-gray-600 dark:text-gray-300 mt-1">Set 1 of 3</p>
+
+        <div class="mt-6 w-full max-w-md hero-box rounded-2xl p-8 flex flex-col items-center justify-center">
+          <div class="w-40 h-40 flex items-center justify-center rounded-lg bg-[#111111]">
+            <div class="text-center text-gray-300">
+              <div style="font-size:44px">🏃‍♂️</div>
+              <div class="mt-3 text-sm">Exercise Animation</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-8 flex flex-col items-center">
+          <div id="player-timer" class="big-circle">00:24</div>
+          <div id="player-reps" class="text-gray-600 dark:text-gray-300 mt-4">20 repetitions</div>
+        </div>
+      </div>
+
+      <div class="px-6 pb-8 pt-2">
+        <div class="flex items-center justify-between">
+          <button id="player-skip" class="flex items-center gap-2 text-gray-600 dark:text-gray-300">
+            <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 4v16l11-8zM19 5v14" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span class="text-sm">Skip</span>
+          </button>
+
+          <button id="player-pause" class="mx-4 w-20 h-20 rounded-2xl bg-pink-500 flex items-center justify-center text-white text-2xl shadow-lg">
+            ||
+          </button>
+
+          <div style="width:48px"></div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+  /***********************
+   * Single-file SPA logic
+   ***********************/
+
+  // Data model (single source) - 9 Comprehensive Workouts
+  const WORKOUTS = [
+    // BEGINNER WORKOUTS
+    {
+      title:'Beginner Upper Body',
+      desc:'Introduction to upper body strength with basic movements',
+      duration:'15 min',
+      difficulty:'beginner',
+      tag:'Upper Body',
+      exercises:[
+        { title:'Wall Push-ups', sets:2, reps:8, rest:60, muscles:'Chest, Arms', durationSeconds:30 },
+        { title:'Arm Circles', sets:2, reps:15, rest:45, muscles:'Shoulders', durationSeconds:25 },
+        { title:'Modified Plank', sets:2, reps:0, rest:60, muscles:'Core, Arms', durationSeconds:20 },
+        { title:'Shoulder Shrugs', sets:2, reps:12, rest:45, muscles:'Shoulders', durationSeconds:25 }
+      ]
+    },
+
+    {
+      title:'Beginner Lower Body',
+      desc:'Build lower body strength with basic movements',
+      duration:'18 min',
+      difficulty:'beginner',
+      tag:'Lower Body',
+      exercises:[
+        { title:'Bodyweight Squats', sets:2, reps:10, rest:60, muscles:'Quadriceps, Glutes', durationSeconds:35 },
+        { title:'Glute Bridge', sets:2, reps:12, rest:45, muscles:'Glutes', durationSeconds:30 },
+        { title:'Calf Raise', sets:2, reps:15, rest:30, muscles:'Calves', durationSeconds:25 },
+        { title:'Wall Sit', sets:2, reps:0, rest:60, muscles:'Quads', durationSeconds:20 },
+        { title:'Standing Leg Lifts', sets:2, reps:10, rest:45, muscles:'Hip Flexors', durationSeconds:30 }
+      ]
+    },
+
+    {
+      title:'Beginner Full Body',
+      desc:'Complete body workout with gentle movements',
+      duration:'20 min',
+      difficulty:'beginner',
+      tag:'Full Body',
+      exercises:[
+        { title:'Marching in Place', sets:2, reps:20, rest:45, muscles:'Full Body', durationSeconds:30 },
+        { title:'Jumping Jacks', sets:2, reps:15, rest:45, muscles:'Full Body', durationSeconds:25 },
+        { title:'Modified Burpees', sets:2, reps:5, rest:60, muscles:'Full Body', durationSeconds:40 },
+        { title:'Standing Side Bends', sets:2, reps:12, rest:30, muscles:'Core', durationSeconds:25 },
+        { title:'Knee Lifts', sets:2, reps:15, rest:45, muscles:'Core, Legs', durationSeconds:30 }
+      ]
+    },
+
+    // INTERMEDIATE WORKOUTS
+    {
+      title:'Intermediate Upper Body',
+      desc:'Build strength in chest, arms, and shoulders',
+      duration:'22 min',
+      difficulty:'intermediate',
+      tag:'Upper Body',
+      exercises:[
+        { title:'Push-ups', sets:3, reps:10, rest:60, muscles:'Chest, Triceps', durationSeconds:40 },
+        { title:'Pike Push-ups', sets:3, reps:8, rest:45, muscles:'Shoulders', durationSeconds:35 },
+        { title:'Tricep Dips', sets:3, reps:10, rest:45, muscles:'Triceps', durationSeconds:35 },
+        { title:'Plank to Downward Dog', sets:3, reps:8, rest:45, muscles:'Full Upper', durationSeconds:40 },
+        { title:'Arm Pulses', sets:3, reps:20, rest:30, muscles:'Shoulders', durationSeconds:30 }
+      ]
+    },
+
+    {
+      title:'Intermediate Lower Body',
+      desc:'Advanced lower body training with dynamic movements',
+      duration:'25 min',
+      difficulty:'intermediate',
+      tag:'Lower Body',
+      exercises:[
+        { title:'Jump Squats', sets:3, reps:12, rest:60, muscles:'Legs, Glutes', durationSeconds:40 },
+        { title:'Lunges', sets:3, reps:10, rest:45, muscles:'Quadriceps, Glutes', durationSeconds:35 },
+        { title:'Single Leg Glute Bridge', sets:3, reps:8, rest:45, muscles:'Glutes', durationSeconds:35 },
+        { title:'Lateral Lunges', sets:3, reps:10, rest:45, muscles:'Inner Thighs', durationSeconds:35 },
+        { title:'Calf Jump Raises', sets:3, reps:15, rest:30, muscles:'Calves', durationSeconds:30 }
+      ]
+    },
+
+    {
+      title:'Intermediate Full Body',
+      desc:'High-intensity workout targeting all major muscle groups',
+      duration:'28 min',
+      difficulty:'intermediate',
+      tag:'Full Body',
+      exercises:[
+        { title:'Burpees', sets:3, reps:8, rest:60, muscles:'Full Body', durationSeconds:45 },
+        { title:'Mountain Climbers', sets:3, reps:20, rest:45, muscles:'Full Body', durationSeconds:35 },
+        { title:'Plank Jacks', sets:3, reps:15, rest:45, muscles:'Core', durationSeconds:35 },
+        { title:'High Knees', sets:3, reps:25, rest:30, muscles:'Cardio', durationSeconds:30 },
+        { title:'Russian Twists', sets:3, reps:20, rest:45, muscles:'Core', durationSeconds:35 }
+      ]
+    },
+
+    // ADVANCED WORKOUTS
+    {
+      title:'Advanced Upper Body',
+      desc:'Intense upper body strength and endurance training',
+      duration:'30 min',
+      difficulty:'advanced',
+      tag:'Upper Body',
+      exercises:[
+        { title:'Diamond Push-ups', sets:4, reps:12, rest:60, muscles:'Triceps, Chest', durationSeconds:50 },
+        { title:'Handstand Push-ups', sets:4, reps:5, rest:75, muscles:'Shoulders', durationSeconds:45 },
+        { title:'Archer Push-ups', sets:4, reps:6, rest:60, muscles:'Chest, Arms', durationSeconds:45 },
+        { title:'Plank Up-Downs', sets:4, reps:10, rest:45, muscles:'Core, Arms', durationSeconds:40 },
+        { title:'Bear Crawl', sets:4, reps:0, rest:60, muscles:'Full Upper', durationSeconds:45 }
+      ]
+    },
+
+    {
+      title:'Advanced Lower Body',
+      desc:'Elite lower body power and strength development',
+      duration:'32 min',
+      difficulty:'advanced',
+      tag:'Lower Body',
+      exercises:[
+        { title:'Pistol Squats', sets:4, reps:5, rest:75, muscles:'Legs, Balance', durationSeconds:50 },
+        { title:'Bulgarian Split Squats', sets:4, reps:12, rest:60, muscles:'Quads, Glutes', durationSeconds:45 },
+        { title:'Single Leg Deadlifts', sets:4, reps:8, rest:60, muscles:'Hamstrings', durationSeconds:45 },
+        { title:'Jump Lunges', sets:4, reps:16, rest:45, muscles:'Explosive Power', durationSeconds:40 },
+        { title:'Wall Sit Hold', sets:4, reps:0, rest:60, muscles:'Endurance', durationSeconds:60 }
+      ]
+    },
+
+    {
+      title:'Advanced Full Body',
+      desc:'Ultimate full body challenge for elite fitness',
+      duration:'35 min',
+      difficulty:'advanced',
+      tag:'Full Body',
+      exercises:[
+        { title:'Burpee Box Jumps', sets:4, reps:10, rest:75, muscles:'Full Body Power', durationSeconds:60 },
+        { title:'Man Makers', sets:4, reps:8, rest:60, muscles:'Full Body', durationSeconds:55 },
+        { title:'Turkish Get-ups', sets:4, reps:4, rest:75, muscles:'Full Body', durationSeconds:50 },
+        { title:'Sprawls', sets:4, reps:12, rest:45, muscles:'Full Body', durationSeconds:45 },
+        { title:'Plank to Jump Squat', sets:4, reps:10, rest:60, muscles:'Full Body', durationSeconds:50 }
+      ]
+    }
+  ];
+
+  // View refs
+  const viewList = document.getElementById('view-list');
+  const viewDetail = document.getElementById('view-detail');
+  const viewPlayer = document.getElementById('view-player');
+
+  // Detail refs
+  const detailTitle = document.getElementById('detail-title');
+  const detailDesc = document.getElementById('detail-desc');
+  const detailDuration = document.getElementById('detail-duration');
+  const detailCount = document.getElementById('detail-count');
+  const detailBadge = document.getElementById('detail-badge');
+  const detailExList = document.getElementById('detail-exList');
+  const detailBack = document.getElementById('detail-back');
+  const detailStart = document.getElementById('detail-start');
+
+  // Player refs
+  const playerTitle = document.getElementById('player-title');
+  const playerSetInfo = document.getElementById('player-setInfo');
+  const playerTimer = document.getElementById('player-timer');
+  const playerReps = document.getElementById('player-reps');
+  const playerProgressLabel = document.getElementById('player-progressLabel');
+  const playerProgressFill = document.getElementById('player-progressFill');
+  const playerClose = document.getElementById('player-close');
+  const playerPause = document.getElementById('player-pause');
+  const playerSkip = document.getElementById('player-skip');
+  const playerVoice = document.getElementById('player-voice');
+  const playerVoiceIcon = document.getElementById('player-voice-icon');
+
+  // List container
+  const workoutsContainer = document.getElementById('workouts');
+
+  // App state
+  let currentWorkoutIndex = 0;
+  let currentExerciseIndex = 0;
+  let remainingSeconds = 0;
+  let timerInterval = null;
+  let isPaused = false;
+  let voiceEnabled = true;
+
+  // Render workouts list
+  function renderWorkouts(){
+    workoutsContainer.innerHTML = '';
+    WORKOUTS.forEach((w, idx) => {
+      const art = document.createElement('article');
+      art.className = 'rounded-2xl overflow-hidden shadow-lg cursor-pointer';
+      art.innerHTML = `
+        <div class="hero-pattern h-44 md:h-52 rounded-2xl relative">
+          <div class="absolute inset-0 flex items-start px-5 pt-5">
+            <span class="text-2xl md:text-3xl font-extrabold text-white">${w.title}</span>
+            <div class="ml-auto">
+              <span class="inline-block text-xs font-semibold uppercase px-3 py-1 rounded-full ${w.difficulty==='beginner' ? 'bg-green-500 text-black' : w.difficulty==='intermediate' ? 'bg-pink-500 text-white' : 'bg-red-500 text-white'}">${w.difficulty.charAt(0).toUpperCase() + w.difficulty.slice(1)}</span>
+            </div>
+          </div>
+          <div class="absolute left-0 right-0 bottom-0 p-4 card-stats">
+            <p class="text-sm text-gray-700 dark:text-gray-200">${w.desc}</p>
+            <div class="mt-3 flex items-center gap-6">
+              <div class="flex items-center gap-2 text-sm">
+                <svg class="w-5 h-5 text-pink-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                <span class="text-gray-800 dark:text-gray-200 font-medium">${w.duration}</span>
+              </div>
+              <div class="flex items-center gap-2 text-sm">
+                <svg class="w-5 h-5 text-pink-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7" opacity="0.3"/></svg>
+                <span class="text-gray-800 dark:text-gray-200 font-medium">${w.exercises.length} exercises</span>
+              </div>
+              <div class="flex items-center gap-2 text-sm ml-auto">
+                <svg class="w-5 h-5 text-pink-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 12h12"/></svg>
+                <span class="text-gray-800 dark:text-gray-200 font-medium">${w.tag}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+      art.addEventListener('click', () => openDetail(idx));
+      workoutsContainer.appendChild(art);
+    });
+  }
+
+  // Navigation helpers
+  function showView(viewId){
+    viewList.classList.add('hidden-view'); viewList.classList.remove('active-view');
+    viewDetail.classList.add('hidden-view'); viewDetail.classList.remove('active-view');
+    viewPlayer.classList.add('hidden-view'); viewPlayer.classList.remove('active-view');
+    document.getElementById(viewId).classList.remove('hidden-view');
+    document.getElementById(viewId).classList.add('active-view');
+    // scroll top for better UX
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }
+
+  // Open detail screen
+  function openDetail(idx){
+    currentWorkoutIndex = idx;
+    const wx = WORKOUTS[idx];
+    detailTitle.textContent = wx.title;
+    detailDesc.textContent = wx.desc;
+    detailDuration.textContent = wx.duration;
+    detailCount.textContent = wx.exercises.length + ' exercises';
+    detailBadge.textContent = wx.difficulty.charAt(0).toUpperCase() + wx.difficulty.slice(1);
+    // Set badge color based on difficulty
+    detailBadge.className = `ml-auto text-xs font-bold px-3 py-1 rounded-full ${
+      wx.difficulty === 'beginner' ? 'bg-green-500 text-black' : 
+      wx.difficulty === 'intermediate' ? 'bg-pink-500 text-white' : 
+      'bg-red-500 text-white'
+    }`;
+
+    // render exercises list
+    detailExList.innerHTML = '';
+    wx.exercises.forEach((ex, i) => {
+      const el = document.createElement('div');
+      el.className = 'flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-xl shadow-md';
+      el.innerHTML = `
+        <div class="flex items-center gap-4">
+          <div class="w-8 h-8 flex items-center justify-center rounded-full bg-blue-500 font-bold text-white">${i+1}</div>
+          <div>
+             <h3 class="font-semibold text-gray-900 dark:text-white">${ex.title}</h3>
+             <p class="text-pink-500 text-sm">${ex.muscles}</p>
+             <p class="text-gray-600 dark:text-gray-400 text-xs">${ex.sets} sets × ${ex.reps ? ex.reps + ' reps' : ex.durationSeconds + 's'} · Rest: ${ex.rest}s</p>
+           </div>
+        </div>
+        <button class="text-sm px-3 py-1 rounded-md bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-900 dark:text-white" data-info="${i}">Info</button>
+      `;
+      detailExList.appendChild(el);
+    });
+
+    showView('view-detail');
+  }
+
+  detailBack.addEventListener('click', ()=> { showView('view-list'); });
+
+  // Start workout from detail -> go to player
+  detailStart.addEventListener('click', ()=> {
+    openPlayer(currentWorkoutIndex);
+  });
+
+  // --- Player logic
+  function openPlayer(workoutIndex){
+    const workout = WORKOUTS[workoutIndex];
+    currentWorkoutIndex = workoutIndex;
+    currentExerciseIndex = 0;
+    voiceEnabled = true;
+    updatePlayerForExercise(currentExerciseIndex);
+    showView('view-player');
+    // small delay then start timer
+    setTimeout(()=> startPlayerTimer(), 200);
+  }
+
+  function updatePlayerForExercise(i){
+    const workout = WORKOUTS[currentWorkoutIndex];
+    const ex = workout.exercises[i];
+    playerTitle.textContent = ex.title;
+    playerSetInfo.textContent = `Set 1 of ${ex.sets || 1}`;
+    playerTimer.textContent = formatTime(ex.durationSeconds);
+    playerReps.textContent = ex.reps ? `${ex.reps} repetitions` : `${ex.durationSeconds} seconds`;
+    playerProgressLabel.textContent = `${i+1} of ${workout.exercises.length}`;
+    const pct = Math.round((i / workout.exercises.length) * 100);
+    playerProgressFill.style.width = pct + '%';
+    remainingSeconds = ex.durationSeconds;
+    speak(`${ex.title}. ${ex.reps ? ex.reps + ' repetitions.' : ex.durationSeconds + ' seconds.'}`);
+  }
+
+  function formatTime(s){
+    const mm = Math.floor(s/60).toString().padStart(2,'0');
+    const ss = (s%60).toString().padStart(2,'0');
+    return mm + ':' + ss;
+  }
+
+  function startPlayerTimer(){
+    clearInterval(timerInterval);
+    isPaused = false;
+    playerPause.innerHTML = '||';
+    timerInterval = setInterval(()=>{
+      if (isPaused) return;
+      remainingSeconds--;
+      if (remainingSeconds < 0) remainingSeconds = 0;
+      playerTimer.textContent = formatTime(remainingSeconds);
+      if (remainingSeconds === 0){
+        clearInterval(timerInterval);
+        speak('Good job. Moving to next exercise.');
+        setTimeout(()=> playerNext(), 700);
+      }
+    }, 1000);
+  }
+
+  function playerPauseToggle(){
+    if (!timerInterval) return;
+    if (isPaused){ isPaused = false; playerPause.innerHTML = '||'; try{ speechSynthesis.resume(); }catch(e){} }
+    else { isPaused = true; playerPause.innerHTML = '▶'; try{ speechSynthesis.pause(); }catch(e){} }
+  }
+
+  function playerNext(){
+    const workout = WORKOUTS[currentWorkoutIndex];
+    currentExerciseIndex++;
+    if (currentExerciseIndex >= workout.exercises.length){
+      playerFinish();
+      return;
+    }
+    updatePlayerForExercise(currentExerciseIndex);
+    startPlayerTimer();
+  }
+
+  function playerFinish(){
+    clearInterval(timerInterval);
+    playerTitle.textContent = 'Workout complete';
+    playerSetInfo.textContent = '';
+    playerTimer.textContent = '00:00';
+    playerReps.textContent = 'Well done!';
+    playerProgressFill.style.width = '100%';
+    speak('Workout complete. Great job!');
+  }
+
+  // player controls
+  playerPause.addEventListener('click', playerPauseToggle);
+  playerSkip.addEventListener('click', ()=> {
+    clearInterval(timerInterval);
+    speak('Skipping to next exercise');
+    playerNext();
+  });
+  playerClose.addEventListener('click', ()=> {
+    clearInterval(timerInterval);
+    try{ speechSynthesis.cancel(); }catch(e){}
+    // return to detail (same workout)
+    openDetail(currentWorkoutIndex);
+  });
+  playerVoice.addEventListener('click', ()=> {
+    voiceEnabled = !voiceEnabled;
+    if (voiceEnabled) playerVoice.innerHTML = '<svg id="player-voice-icon" class="w-6 h-6" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10a3 3 0 1 0 0-6V3z"></path></svg>';
+    else { playerVoice.innerHTML = '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 2l20 20"/></svg>'; try{ speechSynthesis.cancel(); }catch(e){} }
+  });
+
+  function speak(text){
+    if (!voiceEnabled) return;
+    if (!('speechSynthesis' in window)) return;
+    const u = new SpeechSynthesisUtterance(text);
+    const voices = speechSynthesis.getVoices();
+    if (voices && voices.length) u.voice = voices[0];
+    u.rate = 1;
+    try{ speechSynthesis.cancel(); }catch(e){}
+    speechSynthesis.speak(u);
+  }
+
+  // keyboard support
+  window.addEventListener('keydown', (e)=> {
+    // global shortcuts only when player visible
+    if (!viewPlayer.classList.contains('active-view')) return;
+    if (e.key === ' ') { e.preventDefault(); playerPause.click(); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); playerSkip.click(); }
+    if (e.key === 'Escape') { e.preventDefault(); playerClose.click(); }
+  });
+
+  // small helpers
+  function formatTimeShort(s){ return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
+
+  // Initial render
+  renderWorkouts();
+
+  // preload voices (some browsers require gesture)
+  if ('speechSynthesis' in window) { speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices(); }
+
+  </script>
+</body>
+</html>
